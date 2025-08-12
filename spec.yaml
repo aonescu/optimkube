@@ -1,0 +1,179 @@
+# ServiceAccount for RBAC
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cost-optimizer
+  namespace: kube-system
+---
+# ClusterRole with necessary permissions
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cost-optimizer
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "pods", "namespaces", "persistentvolumes", "persistentvolumeclaims"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets", "daemonsets", "statefulsets"]
+  verbs: ["get", "list", "watch", "patch", "update"]
+- apiGroups: ["autoscaling"]
+  resources: ["horizontalpodautoscalers"]
+  verbs: ["get", "list", "watch", "create", "patch", "update"]
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["nodes", "pods"]
+  verbs: ["get", "list"]
+- apiGroups: ["batch"]
+  resources: ["jobs", "cronjobs"]
+  verbs: ["get", "list", "watch"]
+---
+# ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cost-optimizer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cost-optimizer
+subjects:
+- kind: ServiceAccount
+  name: cost-optimizer
+  namespace: kube-system
+---
+# ConfigMap for configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cost-optimizer-config
+  namespace: kube-system
+data:
+  config.yaml: |
+    cost_calculator:
+      node_costs:
+        t3.micro: 0.0104
+        t3.small: 0.0208
+        t3.medium: 0.0416
+        t3.large: 0.0832
+        t3.xlarge: 0.1664
+        t3.2xlarge: 0.3328
+        m5.large: 0.096
+        m5.xlarge: 0.192
+        m5.2xlarge: 0.384
+        m5.4xlarge: 0.768
+        c5.large: 0.085
+        c5.xlarge: 0.17
+        c5.2xlarge: 0.34
+        c5.4xlarge: 0.68
+        default: 0.1
+      storage_cost_per_gb: 0.10
+    monitoring:
+      interval: 300 # 5 minutes
+      retention_days: 30
+    thresholds:
+      cpu_underutilization: 20
+      memory_underutilization: 30
+      cpu_overutilization: 90
+      memory_overutilization: 90
+---
+# Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cost-optimizer
+  namespace: kube-system
+  labels:
+    app: cost-optimizer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cost-optimizer
+  template:
+    metadata:
+      labels:
+        app: cost-optimizer
+    spec:
+      serviceAccountName: cost-optimizer
+      containers:
+      - name: cost-optimizer
+        image: cost-optimizer:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+          name: http
+        env:
+        - name: PORT
+          value: "8080"
+        - name: LOG_LEVEL
+          value: "info"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        volumeMounts:
+        - name: config
+          mountPath: /etc/cost-optimizer
+          readOnly: true
+      volumes:
+      - name: config
+        configMap:
+          name: cost-optimizer-config
+---
+# Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: cost-optimizer
+  namespace: kube-system
+  labels:
+    app: cost-optimizer
+spec:
+  type: ClusterIP
+  ports:
+  - port: 80
+    targetPort: 8080
+    protocol: TCP
+    name: http
+  selector:
+    app: cost-optimizer
+---
+# Ingress (optional)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: cost-optimizer
+  namespace: kube-system
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    # Add authentication annotations as needed
+    # nginx.ingress.kubernetes.io/auth-type: basic
+    # nginx.ingress.kubernetes.io/auth-secret: cost-optimizer-auth
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: cost-optimizer.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: cost-optimizer
+            port:
+              number: 80

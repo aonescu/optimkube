@@ -1,0 +1,355 @@
+# Kubernetes Cost Optimizer Configuration
+
+# Server Configuration
+server:
+  port: 8080
+  host: "0.0.0.0"
+  read_timeout: 30s
+  write_timeout: 30s
+  idle_timeout: 60s
+
+# Logging Configuration
+logging:
+  level: "info"  # debug, info, warn, error
+  format: "json"  # json, text
+  output: "stdout"  # stdout, stderr, or file path
+
+# Kubernetes Configuration
+kubernetes:
+  # Leave empty for in-cluster config, or specify kubeconfig path
+  kubeconfig: ""
+  # Namespace to monitor (empty for all namespaces)
+  namespace: ""
+  # Request timeout for Kubernetes API calls
+  timeout: 30s
+
+# Cost Calculator Configuration
+cost_calculator:
+  # Node instance type hourly costs (USD)
+  node_costs:
+    # AWS EC2 instances
+    t3.nano: 0.0052
+    t3.micro: 0.0104
+    t3.small: 0.0208
+    t3.medium: 0.0416
+    t3.large: 0.0832
+    t3.xlarge: 0.1664
+    t3.2xlarge: 0.3328
+    
+    # General purpose
+    m5.large: 0.096
+    m5.xlarge: 0.192
+    m5.2xlarge: 0.384
+    m5.4xlarge: 0.768
+    m5.8xlarge: 1.536
+    m5.12xlarge: 2.304
+    m5.16xlarge: 3.072
+    m5.24xlarge: 4.608
+    
+    # Compute optimized
+    c5.large: 0.085
+    c5.xlarge: 0.17
+    c5.2xlarge: 0.34
+    c5.4xlarge: 0.68
+    c5.9xlarge: 1.53
+    c5.12xlarge: 2.04
+    c5.18xlarge: 3.06
+    c5.24xlarge: 4.08
+    
+    # Memory optimized
+    r5.large: 0.126
+    r5.xlarge: 0.252
+    r5.2xlarge: 0.504
+    r5.4xlarge: 1.008
+    r5.8xlarge: 2.016
+    r5.12xlarge: 3.024
+    r5.16xlarge: 4.032
+    r5.24xlarge: 6.048
+    
+    # Storage optimized
+    i3.large: 0.156
+    i3.xlarge: 0.312
+    i3.2xlarge: 0.624
+    i3.4xlarge: 1.248
+    i3.8xlarge: 2.496
+    i3.16xlarge: 4.992
+    
+    # GPU instances
+    p3.2xlarge: 3.06
+    p3.8xlarge: 12.24
+    p3.16xlarge: 24.48
+    
+    # Default fallback cost
+    default: 0.1
+  
+  # Storage costs (USD per GB per month)
+  storage_costs:
+    gp2: 0.10        # General Purpose SSD
+    gp3: 0.08        # General Purpose SSD (new generation)
+    io1: 0.125       # Provisioned IOPS SSD
+    io2: 0.125       # Provisioned IOPS SSD (new generation)
+    st1: 0.045       # Throughput Optimized HDD
+    sc1: 0.025       # Cold HDD
+    default: 0.10    # Default storage cost
+  
+  # Network costs (USD per GB)
+  network_costs:
+    ingress: 0.0     # Data transfer in
+    egress: 0.09     # Data transfer out
+    inter_az: 0.01   # Data transfer between AZs
+    inter_region: 0.02  # Data transfer between regions
+  
+  # Cost calculation settings
+  settings:
+    # Currency symbol
+    currency: "$"
+    # Regional cost multipliers (to account for different pricing in regions)
+    regional_multipliers:
+      us-east-1: 1.0
+      us-west-2: 1.0
+      eu-west-1: 1.1
+      ap-southeast-1: 1.15
+      default: 1.0
+
+# Monitoring Configuration
+monitoring:
+  # Interval between cost analysis runs
+  analysis_interval: 300s  # 5 minutes
+  # Metrics collection interval
+  metrics_interval: 60s    # 1 minute
+  # Data retention period
+  retention_days: 30
+  # Enable detailed pod-level monitoring
+  detailed_monitoring: true
+  # Maximum number of metrics to store in memory
+  max_metrics_in_memory: 10000
+
+# Optimization Thresholds
+thresholds:
+  # CPU utilization thresholds (percentage)
+  cpu:
+    underutilized: 20      # Below this is considered underutilized
+    overutilized: 90       # Above this is considered overutilized
+    target_utilization: 70 # Target utilization for recommendations
+  
+  # Memory utilization thresholds (percentage)
+  memory:
+    underutilized: 30
+    overutilized: 90
+    target_utilization: 75
+  
+  # Node utilization thresholds
+  node:
+    min_utilization: 40    # Minimum node utilization before recommending consolidation
+    max_utilization: 85    # Maximum node utilization before recommending scale-out
+  
+  # Waste detection thresholds
+  waste:
+    # Minimum monthly cost to consider for optimization (avoid micro-optimizations)
+    min_monthly_cost: 10.0
+    # Minimum savings percentage to generate recommendation
+    min_savings_percentage: 5.0
+    # Maximum days without activity before considering resource "idle"
+    idle_days: 7
+
+# Recommendation Engine Configuration
+recommendations:
+  # Enable/disable recommendation types
+  enabled_types:
+    node_optimization: true
+    resource_rightsizing: true
+    horizontal_scaling: true
+    vertical_scaling: true
+    storage_optimization: true
+    cost_allocation: true
+    unused_resources: true
+  
+  # Recommendation priorities and weights
+  priority_weights:
+    high: 100
+    medium: 50
+    low: 20
+  
+  # Confidence thresholds for recommendations
+  confidence_thresholds:
+    high: 0.8
+    medium: 0.6
+    low: 0.4
+  
+  # Maximum number of recommendations to generate
+  max_recommendations: 50
+  
+  # Recommendation refresh interval
+  refresh_interval: 600s  # 10 minutes
+
+# Auto-optimization Configuration
+auto_optimization:
+  # Enable automatic optimization actions
+  enabled: false
+  
+  # Dry run mode (log actions but don't execute)
+  dry_run: true
+  
+  # Allowed automatic actions
+  allowed_actions:
+    - scale_down_idle_deployments
+    - update_resource_requests
+    - create_hpa
+  
+  # Safety limits
+  safety_limits:
+    max_scale_down_percentage: 50  # Maximum percentage to scale down at once
+    min_replicas: 1                # Minimum replicas to maintain
+    cooldown_period: 300s          # Time between automatic actions
+  
+  # Confirmation requirements
+  confirmation:
+    require_manual_approval: true
+    approval_timeout: 3600s  # 1 hour
+
+# Alerting Configuration
+alerting:
+  enabled: true
+  
+  # Alert thresholds
+  thresholds:
+    high_cost_increase: 20    # Percentage increase in costs
+    high_waste_percentage: 30 # Percentage of wasted resources
+    critical_utilization: 95  # Critical resource utilization
+  
+  # Notification channels (configure based on your setup)
+  channels:
+    slack:
+      enabled: false
+      webhook_url: ""
+      channel: "#cost-optimization"
+    
+    email:
+      enabled: false
+      smtp_server: ""
+      from_address: ""
+      to_addresses: []
+    
+    webhook:
+      enabled: false
+      url: ""
+      headers: {}
+
+# Security Configuration
+security:
+  # API authentication
+  auth:
+    enabled: false
+    type: "basic"  # basic, bearer, api_key
+    # For basic auth
+    username: "admin"
+    password: ""  # Set via environment variable
+    # For API key auth
+    api_key: ""   # Set via environment variable
+    
+  # Rate limiting
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 60
+    burst_size: 10
+  
+  # CORS settings
+  cors:
+    enabled: true
+    allowed_origins: ["*"]
+    allowed_methods: ["GET", "POST", "PUT", "DELETE"]
+    allowed_headers: ["*"]
+
+# Database Configuration (for persistent storage)
+database:
+  # Database type: memory, sqlite, postgres, mysql
+  type: "memory"
+  
+  # Connection settings (for external databases)
+  connection:
+    host: ""
+    port: 5432
+    database: "cost_optimizer"
+    username: ""
+    password: ""  # Set via environment variable
+    ssl_mode: "require"
+  
+  # Connection pool settings
+  pool:
+    max_open_connections: 10
+    max_idle_connections: 5
+    connection_max_lifetime: 300s
+
+# Performance Configuration
+performance:
+  # Worker pool sizes
+  workers:
+    metrics_collection: 5
+    cost_calculation: 3
+    recommendation_generation: 2
+  
+  # Caching settings
+  cache:
+    enabled: true
+    ttl: 300s      # 5 minutes
+    max_size: 1000 # Maximum number of cached items
+  
+  # Resource limits
+  limits:
+    max_memory_usage: "512Mi"
+    max_cpu_usage: "500m"
+    max_goroutines: 1000
+
+# Feature Flags
+features:
+  # Enable experimental features
+  experimental:
+    machine_learning_predictions: false
+    cost_forecasting: false
+    anomaly_detection: false
+    multi_cloud_support: false
+  
+  # Beta features
+  beta:
+    advanced_scheduling_insights: true
+    cost_allocation_by_labels: true
+    custom_metrics_integration: true
+  
+  # Debug features
+  debug:
+    enable_profiling: false
+    enable_tracing: false
+    verbose_logging: false
+
+# Integration Configuration
+integrations:
+  # Prometheus integration
+  prometheus:
+    enabled: false
+    endpoint: "http://prometheus:9090"
+    metrics_prefix: "cost_optimizer_"
+  
+  # Grafana integration
+  grafana:
+    enabled: false
+    dashboard_url: ""
+  
+  # Cloud provider integrations
+  cloud_providers:
+    aws:
+      enabled: false
+      region: "us-east-1"
+      access_key_id: ""      # Set via environment variable
+      secret_access_key: ""   # Set via environment variable
+    
+    azure:
+      enabled: false
+      subscription_id: ""
+      tenant_id: ""
+      client_id: ""
+      client_secret: ""      # Set via environment variable
+    
+    gcp:
+      enabled: false
+      project_id: ""
+      credentials_file: ""   # Path to service account JSON
