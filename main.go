@@ -27,77 +27,80 @@ type CostOptimizer struct {
 	metricsClient   *metricsclientset.Clientset
 	costCalculator  *CostCalculator
 	recommendations []Recommendation
+	demoMode        bool
+	clusterName     string
+	now             func() time.Time
 }
 
 // CostCalculator handles cost calculations
 type CostCalculator struct {
-	NodeCostPerHour map[string]float64 // instance type -> cost per hour
-	StorageCostPerGB float64           // cost per GB per month
+	NodeCostPerHour  map[string]float64 // instance type -> cost per hour
+	StorageCostPerGB float64            // cost per GB per month
 }
 
 // NodeMetrics represents node resource usage
 type NodeMetrics struct {
-	Name            string  `json:"name"`
-	CPUUsage        float64 `json:"cpu_usage"`
-	MemoryUsage     float64 `json:"memory_usage"`
-	CPUCapacity     float64 `json:"cpu_capacity"`
-	MemoryCapacity  float64 `json:"memory_capacity"`
-	CPUUtilization  float64 `json:"cpu_utilization"`
+	Name              string  `json:"name"`
+	CPUUsage          float64 `json:"cpu_usage"`
+	MemoryUsage       float64 `json:"memory_usage"`
+	CPUCapacity       float64 `json:"cpu_capacity"`
+	MemoryCapacity    float64 `json:"memory_capacity"`
+	CPUUtilization    float64 `json:"cpu_utilization"`
 	MemoryUtilization float64 `json:"memory_utilization"`
-	EstimatedCost   float64 `json:"estimated_cost"`
-	InstanceType    string  `json:"instance_type"`
+	EstimatedCost     float64 `json:"estimated_cost"`
+	InstanceType      string  `json:"instance_type"`
 }
 
 // PodMetrics represents pod resource usage
 type PodMetrics struct {
-	Name           string  `json:"name"`
-	Namespace      string  `json:"namespace"`
-	CPUUsage       float64 `json:"cpu_usage"`
-	MemoryUsage    float64 `json:"memory_usage"`
-	CPURequest     float64 `json:"cpu_request"`
-	MemoryRequest  float64 `json:"memory_request"`
-	CPULimit       float64 `json:"cpu_limit"`
-	MemoryLimit    float64 `json:"memory_limit"`
-	EstimatedCost  float64 `json:"estimated_cost"`
+	Name          string  `json:"name"`
+	Namespace     string  `json:"namespace"`
+	CPUUsage      float64 `json:"cpu_usage"`
+	MemoryUsage   float64 `json:"memory_usage"`
+	CPURequest    float64 `json:"cpu_request"`
+	MemoryRequest float64 `json:"memory_request"`
+	CPULimit      float64 `json:"cpu_limit"`
+	MemoryLimit   float64 `json:"memory_limit"`
+	EstimatedCost float64 `json:"estimated_cost"`
 }
 
 // Recommendation represents optimization suggestions
 type Recommendation struct {
-	Type        string  `json:"type"`
-	Resource    string  `json:"resource"`
-	Namespace   string  `json:"namespace"`
-	Description string  `json:"description"`
-	Impact      string  `json:"impact"`
-	Savings     float64 `json:"potential_savings"`
-	Priority    string  `json:"priority"`
+	Type        string    `json:"type"`
+	Resource    string    `json:"resource"`
+	Namespace   string    `json:"namespace"`
+	Description string    `json:"description"`
+	Impact      string    `json:"impact"`
+	Savings     float64   `json:"potential_savings"`
+	Priority    string    `json:"priority"`
 	Timestamp   time.Time `json:"timestamp"`
 }
 
 // ClusterCostSummary provides overall cost analysis
 type ClusterCostSummary struct {
-	TotalMonthlyCost     float64            `json:"total_monthly_cost"`
-	ComputeCost          float64            `json:"compute_cost"`
-	StorageCost          float64            `json:"storage_cost"`
-	WastedResources      float64            `json:"wasted_resources"`
-	PotentialSavings     float64            `json:"potential_savings"`
-	NodeCount            int                `json:"node_count"`
-	PodCount             int                `json:"pod_count"`
-	NamespaceCosts       map[string]float64 `json:"namespace_costs"`
-	RecommendationCount  int                `json:"recommendation_count"`
-	LastUpdated          time.Time          `json:"last_updated"`
+	TotalMonthlyCost    float64            `json:"total_monthly_cost"`
+	ComputeCost         float64            `json:"compute_cost"`
+	StorageCost         float64            `json:"storage_cost"`
+	WastedResources     float64            `json:"wasted_resources"`
+	PotentialSavings    float64            `json:"potential_savings"`
+	NodeCount           int                `json:"node_count"`
+	PodCount            int                `json:"pod_count"`
+	NamespaceCosts      map[string]float64 `json:"namespace_costs"`
+	RecommendationCount int                `json:"recommendation_count"`
+	LastUpdated         time.Time          `json:"last_updated"`
 }
 
 // OptimizationAction represents actions that can be taken
 type OptimizationAction struct {
-	ID          string    `json:"id"`
-	Type        string    `json:"type"`
-	Resource    string    `json:"resource"`
-	Namespace   string    `json:"namespace"`
-	Action      string    `json:"action"`
-	Parameters  map[string]interface{} `json:"parameters"`
-	Status      string    `json:"status"`
-	CreatedAt   time.Time `json:"created_at"`
-	ExecutedAt  *time.Time `json:"executed_at,omitempty"`
+	ID         string                 `json:"id"`
+	Type       string                 `json:"type"`
+	Resource   string                 `json:"resource"`
+	Namespace  string                 `json:"namespace"`
+	Action     string                 `json:"action"`
+	Parameters map[string]interface{} `json:"parameters"`
+	Status     string                 `json:"status"`
+	CreatedAt  time.Time              `json:"created_at"`
+	ExecutedAt *time.Time             `json:"executed_at,omitempty"`
 }
 
 func main() {
@@ -106,12 +109,16 @@ func main() {
 		log.Fatalf("Failed to initialize cost optimizer: %v", err)
 	}
 
+	if optimizer.demoMode {
+		log.Println("Running in demo mode: serving synthetic Kubernetes metrics")
+	}
+
 	// Start background monitoring
 	go optimizer.StartMonitoring()
 
 	// Setup HTTP server
 	router := mux.NewRouter()
-	
+
 	// API endpoints
 	router.HandleFunc("/api/metrics/nodes", optimizer.handleNodeMetrics).Methods("GET")
 	router.HandleFunc("/api/metrics/pods", optimizer.handlePodMetrics).Methods("GET")
@@ -132,47 +139,64 @@ func main() {
 }
 
 func NewCostOptimizer() (*CostOptimizer, error) {
+	clusterName := os.Getenv("CLUSTER_NAME")
+	if clusterName == "" {
+		clusterName = "local-cluster"
+	}
+
+	demoMode := strings.EqualFold(os.Getenv("DEMO_MODE"), "true")
+
 	// Initialize Kubernetes client
 	var config *rest.Config
 	var err error
 
-	if kubeconfig := os.Getenv("KUBECONFIG"); kubeconfig != "" {
-		config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
-	} else {
-		config, err = rest.InClusterConfig()
-	}
-	if err != nil {
-		return nil, fmt.Errorf("failed to create kubernetes config: %v", err)
-	}
+	var clientset *kubernetes.Clientset
+	var metricsClient *metricsclientset.Clientset
 
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create kubernetes client: %v", err)
-	}
+	if !demoMode {
+		if kubeconfig := os.Getenv("KUBECONFIG"); kubeconfig != "" {
+			config, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
+		} else {
+			config, err = rest.InClusterConfig()
+		}
 
-	metricsClient, err := metricsclientset.NewForConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create metrics client: %v", err)
+		if err != nil {
+			log.Printf("Failed to create kubernetes config, falling back to demo mode: %v", err)
+			demoMode = true
+		} else {
+			clientset, err = kubernetes.NewForConfig(config)
+			if err != nil {
+				log.Printf("Failed to create kubernetes client, falling back to demo mode: %v", err)
+				demoMode = true
+			}
+			if !demoMode {
+				metricsClient, err = metricsclientset.NewForConfig(config)
+				if err != nil {
+					log.Printf("Failed to create metrics client, falling back to demo mode: %v", err)
+					demoMode = true
+				}
+			}
+		}
 	}
 
 	// Initialize cost calculator with sample pricing
 	costCalculator := &CostCalculator{
 		NodeCostPerHour: map[string]float64{
-			"t3.micro":    0.0104,
-			"t3.small":    0.0208,
-			"t3.medium":   0.0416,
-			"t3.large":    0.0832,
-			"t3.xlarge":   0.1664,
-			"t3.2xlarge":  0.3328,
-			"m5.large":    0.096,
-			"m5.xlarge":   0.192,
-			"m5.2xlarge":  0.384,
-			"m5.4xlarge":  0.768,
-			"c5.large":    0.085,
-			"c5.xlarge":   0.17,
-			"c5.2xlarge":  0.34,
-			"c5.4xlarge":  0.68,
-			"default":     0.1, // fallback cost
+			"t3.micro":   0.0104,
+			"t3.small":   0.0208,
+			"t3.medium":  0.0416,
+			"t3.large":   0.0832,
+			"t3.xlarge":  0.1664,
+			"t3.2xlarge": 0.3328,
+			"m5.large":   0.096,
+			"m5.xlarge":  0.192,
+			"m5.2xlarge": 0.384,
+			"m5.4xlarge": 0.768,
+			"c5.large":   0.085,
+			"c5.xlarge":  0.17,
+			"c5.2xlarge": 0.34,
+			"c5.4xlarge": 0.68,
+			"default":    0.1, // fallback cost
 		},
 		StorageCostPerGB: 0.10, // $0.10 per GB per month
 	}
@@ -182,6 +206,9 @@ func NewCostOptimizer() (*CostOptimizer, error) {
 		metricsClient:   metricsClient,
 		costCalculator:  costCalculator,
 		recommendations: make([]Recommendation, 0),
+		demoMode:        demoMode,
+		clusterName:     clusterName,
+		now:             time.Now,
 	}, nil
 }
 
@@ -218,7 +245,11 @@ func (co *CostOptimizer) analyzeAndGenerateRecommendations() {
 
 func (co *CostOptimizer) analyzeNodes(ctx context.Context) []Recommendation {
 	recommendations := make([]Recommendation, 0)
-	
+
+	if co.demoMode || co.clientset == nil || co.metricsClient == nil {
+		return co.demoNodeRecommendations()
+	}
+
 	nodes, err := co.clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		log.Printf("Failed to list nodes: %v", err)
@@ -248,7 +279,7 @@ func (co *CostOptimizer) analyzeNodes(ctx context.Context) []Recommendation {
 		// Calculate utilization
 		cpuCapacity := node.Status.Capacity[corev1.ResourceCPU]
 		memoryCapacity := node.Status.Capacity[corev1.ResourceMemory]
-		
+
 		cpuUsage := metrics.Usage[corev1.ResourceCPU]
 		memoryUsage := metrics.Usage[corev1.ResourceMemory]
 
@@ -287,7 +318,11 @@ func (co *CostOptimizer) analyzeNodes(ctx context.Context) []Recommendation {
 
 func (co *CostOptimizer) analyzePods(ctx context.Context) []Recommendation {
 	recommendations := make([]Recommendation, 0)
-	
+
+	if co.demoMode || co.clientset == nil || co.metricsClient == nil {
+		return co.demoPodRecommendations()
+	}
+
 	pods, err := co.clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
 	if err != nil {
 		log.Printf("Failed to list pods: %v", err)
@@ -325,12 +360,12 @@ func (co *CostOptimizer) analyzePods(ctx context.Context) []Recommendation {
 			}
 
 			containerMetrics := metrics.Containers[i]
-			
+
 			// Check CPU over-provisioning
 			if container.Resources.Requests != nil {
 				cpuRequest := container.Resources.Requests[corev1.ResourceCPU]
 				cpuUsage := containerMetrics.Usage[corev1.ResourceCPU]
-				
+
 				if cpuRequest.MilliValue() > 0 && cpuUsage.MilliValue() < cpuRequest.MilliValue()/2 {
 					recommendations = append(recommendations, Recommendation{
 						Type:        "resource_rightsizing",
@@ -349,7 +384,7 @@ func (co *CostOptimizer) analyzePods(ctx context.Context) []Recommendation {
 			if container.Resources.Requests != nil {
 				memRequest := container.Resources.Requests[corev1.ResourceMemory]
 				memUsage := containerMetrics.Usage[corev1.ResourceMemory]
-				
+
 				if memRequest.Value() > 0 && memUsage.Value() < memRequest.Value()/2 {
 					recommendations = append(recommendations, Recommendation{
 						Type:        "resource_rightsizing",
@@ -371,7 +406,11 @@ func (co *CostOptimizer) analyzePods(ctx context.Context) []Recommendation {
 
 func (co *CostOptimizer) analyzeDeployments(ctx context.Context) []Recommendation {
 	recommendations := make([]Recommendation, 0)
-	
+
+	if co.demoMode || co.clientset == nil {
+		return co.demoDeploymentRecommendations()
+	}
+
 	deployments, err := co.clientset.AppsV1().Deployments("").List(ctx, metav1.ListOptions{})
 	if err != nil {
 		log.Printf("Failed to list deployments: %v", err)
@@ -429,7 +468,7 @@ func (co *CostOptimizer) calculateNodeCost(nodeName, instanceType string) float6
 		}
 		return co.costCalculator.NodeCostPerHour["default"]
 	}
-	
+
 	if cost, exists := co.costCalculator.NodeCostPerHour[instanceType]; exists {
 		return cost
 	}
@@ -440,7 +479,7 @@ func (co *CostOptimizer) calculateNodeCost(nodeName, instanceType string) float6
 func (co *CostOptimizer) handleNodeMetrics(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 	nodeMetrics := co.getNodeMetrics(ctx)
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(nodeMetrics)
 }
@@ -448,7 +487,7 @@ func (co *CostOptimizer) handleNodeMetrics(w http.ResponseWriter, r *http.Reques
 func (co *CostOptimizer) handlePodMetrics(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 	podMetrics := co.getPodMetrics(ctx)
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(podMetrics)
 }
@@ -461,7 +500,7 @@ func (co *CostOptimizer) handleRecommendations(w http.ResponseWriter, r *http.Re
 func (co *CostOptimizer) handleCostSummary(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 	summary := co.generateCostSummary(ctx)
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(summary)
 }
@@ -469,7 +508,7 @@ func (co *CostOptimizer) handleCostSummary(w http.ResponseWriter, r *http.Reques
 func (co *CostOptimizer) handleOptimize(w http.ResponseWriter, r *http.Request) {
 	// Trigger immediate analysis
 	go co.analyzeAndGenerateRecommendations()
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
 		"status":  "optimization_triggered",
@@ -493,7 +532,7 @@ func (co *CostOptimizer) handleActions(w http.ResponseWriter, r *http.Request) {
 			CreatedAt: time.Now(),
 		},
 	}
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(actions)
 }
@@ -501,21 +540,25 @@ func (co *CostOptimizer) handleActions(w http.ResponseWriter, r *http.Request) {
 func (co *CostOptimizer) handleExecuteAction(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	actionID := vars["id"]
-	
+
 	// In a real implementation, this would execute the optimization action
 	log.Printf("Executing optimization action: %s", actionID)
-	
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
-		"status":  "executed",
+		"status":    "executed",
 		"action_id": actionID,
-		"message": "Optimization action executed successfully",
+		"message":   "Optimization action executed successfully",
 	})
 }
 
 func (co *CostOptimizer) getNodeMetrics(ctx context.Context) []NodeMetrics {
 	metrics := make([]NodeMetrics, 0)
-	
+
+	if co.demoMode || co.clientset == nil || co.metricsClient == nil {
+		return co.demoNodeMetrics()
+	}
+
 	nodes, err := co.clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		log.Printf("Failed to list nodes: %v", err)
@@ -570,7 +613,11 @@ func (co *CostOptimizer) getNodeMetrics(ctx context.Context) []NodeMetrics {
 
 func (co *CostOptimizer) getPodMetrics(ctx context.Context) []PodMetrics {
 	metrics := make([]PodMetrics, 0)
-	
+
+	if co.demoMode || co.clientset == nil || co.metricsClient == nil {
+		return co.demoPodMetrics()
+	}
+
 	pods, err := co.clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
 	if err != nil {
 		log.Printf("Failed to list pods: %v", err)
@@ -652,45 +699,45 @@ func (co *CostOptimizer) getPodMetrics(ctx context.Context) []PodMetrics {
 func (co *CostOptimizer) generateCostSummary(ctx context.Context) ClusterCostSummary {
 	nodeMetrics := co.getNodeMetrics(ctx)
 	podMetrics := co.getPodMetrics(ctx)
-	
+
 	var totalComputeCost, totalStorageCost, wastedResources float64
 	namespaceCosts := make(map[string]float64)
-	
+
 	// Calculate compute costs
 	for _, node := range nodeMetrics {
 		totalComputeCost += node.EstimatedCost
-		
+
 		// Calculate wasted resources (underutilized capacity)
 		if node.CPUUtilization < 50 || node.MemoryUtilization < 50 {
 			wastedResources += node.EstimatedCost * 0.3 // 30% waste factor
 		}
 	}
-	
+
 	// Calculate namespace costs
 	for _, pod := range podMetrics {
 		namespaceCosts[pod.Namespace] += pod.EstimatedCost
 	}
-	
+
 	// Estimate storage costs (simplified)
 	totalStorageCost = 100.0 // Placeholder
-	
+
 	// Calculate potential savings from recommendations
 	var potentialSavings float64
 	for _, rec := range co.recommendations {
 		potentialSavings += rec.Savings
 	}
-	
+
 	return ClusterCostSummary{
-		TotalMonthlyCost:     totalComputeCost + totalStorageCost,
-		ComputeCost:          totalComputeCost,
-		StorageCost:          totalStorageCost,
-		WastedResources:      wastedResources,
-		PotentialSavings:     potentialSavings,
-		NodeCount:            len(nodeMetrics),
-		PodCount:             len(podMetrics),
-		NamespaceCosts:       namespaceCosts,
-		RecommendationCount:  len(co.recommendations),
-		LastUpdated:          time.Now(),
+		TotalMonthlyCost:    totalComputeCost + totalStorageCost,
+		ComputeCost:         totalComputeCost,
+		StorageCost:         totalStorageCost,
+		WastedResources:     wastedResources,
+		PotentialSavings:    potentialSavings,
+		NodeCount:           len(nodeMetrics),
+		PodCount:            len(podMetrics),
+		NamespaceCosts:      namespaceCosts,
+		RecommendationCount: len(co.recommendations),
+		LastUpdated:         co.now(),
 	}
 }
 
@@ -707,7 +754,136 @@ func (co *CostOptimizer) extractInstanceType(nodeName string) string {
 func (co *CostOptimizer) estimatePodCost(cpuRequest, memRequest resource.Quantity) float64 {
 	// Simple cost estimation based on resource requests
 	// This is a simplified calculation - in reality, you'd want more sophisticated cost allocation
-	cpuCost := float64(cpuRequest.MilliValue()) / 1000 * 0.05 * 24 * 30 // $0.05 per CPU hour
+	cpuCost := float64(cpuRequest.MilliValue()) / 1000 * 0.05 * 24 * 30            // $0.05 per CPU hour
 	memCost := float64(memRequest.Value()) / (1024 * 1024 * 1024) * 0.01 * 24 * 30 // $0.01 per GB hour
 	return cpuCost + memCost
+}
+
+// demo helpers keep the API usable without a live cluster, making the service
+// easier to showcase in local or CI environments.
+func (co *CostOptimizer) demoNodeMetrics() []NodeMetrics {
+	return []NodeMetrics{
+		{
+			Name:              fmt.Sprintf("%s-node-1", co.clusterName),
+			CPUUsage:          0.12,
+			MemoryUsage:       2.5,
+			CPUCapacity:       2,
+			MemoryCapacity:    8,
+			CPUUtilization:    6,
+			MemoryUtilization: 31,
+			EstimatedCost:     co.costCalculator.NodeCostPerHour["t3.medium"] * 24 * 30,
+			InstanceType:      "t3.medium",
+		},
+		{
+			Name:              fmt.Sprintf("%s-node-2", co.clusterName),
+			CPUUsage:          1.6,
+			MemoryUsage:       6.2,
+			CPUCapacity:       4,
+			MemoryCapacity:    16,
+			CPUUtilization:    40,
+			MemoryUtilization: 39,
+			EstimatedCost:     co.costCalculator.NodeCostPerHour["m5.xlarge"] * 24 * 30,
+			InstanceType:      "m5.xlarge",
+		},
+	}
+}
+
+func (co *CostOptimizer) demoPodMetrics() []PodMetrics {
+	return []PodMetrics{
+		{
+			Name:          "api-7c4d9f6c9b-abcde",
+			Namespace:     "default",
+			CPUUsage:      0.08,
+			MemoryUsage:   0.35,
+			CPURequest:    0.2,
+			MemoryRequest: 0.5,
+			CPULimit:      0.5,
+			MemoryLimit:   1.0,
+			EstimatedCost: 12.5,
+		},
+		{
+			Name:          "worker-5f7b6c6bdf-xyz12",
+			Namespace:     "batch",
+			CPUUsage:      0.4,
+			MemoryUsage:   0.8,
+			CPURequest:    0.6,
+			MemoryRequest: 1.0,
+			CPULimit:      1.0,
+			MemoryLimit:   2.0,
+			EstimatedCost: 28.3,
+		},
+	}
+}
+
+func (co *CostOptimizer) demoNodeRecommendations() []Recommendation {
+	return []Recommendation{
+		{
+			Type:        "node_optimization",
+			Resource:    fmt.Sprintf("%s-node-1", co.clusterName),
+			Description: "Node is underutilized (CPU: 6.0%, Memory: 31.0%)",
+			Impact:      "Consider consolidating workloads or downsizing",
+			Savings:     co.costCalculator.NodeCostPerHour["t3.medium"] * 24 * 30 * 0.7,
+			Priority:    "medium",
+			Timestamp:   co.now(),
+		},
+		{
+			Type:        "node_scaling",
+			Resource:    fmt.Sprintf("%s-node-2", co.clusterName),
+			Description: "Node is nearing limits during peaks",
+			Impact:      "Evaluate scaling up or adding nodes",
+			Savings:     -50,
+			Priority:    "high",
+			Timestamp:   co.now(),
+		},
+	}
+}
+
+func (co *CostOptimizer) demoPodRecommendations() []Recommendation {
+	return []Recommendation{
+		{
+			Type:        "resource_rightsizing",
+			Resource:    "default/api-7c4d9f6c9b-abcde",
+			Namespace:   "default",
+			Description: "Container is over-provisioned for CPU (request: 200m, usage: 80m)",
+			Impact:      "Reduce CPU request to optimize resource allocation",
+			Savings:     15.0,
+			Priority:    "low",
+			Timestamp:   co.now(),
+		},
+		{
+			Type:        "resource_rightsizing",
+			Resource:    "batch/worker-5f7b6c6bdf-xyz12",
+			Namespace:   "batch",
+			Description: "Container is over-provisioned for memory (request: 1Gi, usage: 0.8Gi)",
+			Impact:      "Reduce memory request to save capacity",
+			Savings:     12.0,
+			Priority:    "medium",
+			Timestamp:   co.now(),
+		},
+	}
+}
+
+func (co *CostOptimizer) demoDeploymentRecommendations() []Recommendation {
+	return []Recommendation{
+		{
+			Type:        "horizontal_scaling",
+			Resource:    "default/api",
+			Namespace:   "default",
+			Description: "Deployment could benefit from auto-scaling based on CPU/memory",
+			Impact:      "Implement HPA to scale with demand",
+			Savings:     25.0,
+			Priority:    "medium",
+			Timestamp:   co.now(),
+		},
+		{
+			Type:        "resource_governance",
+			Resource:    "batch/worker",
+			Namespace:   "batch",
+			Description: "Deployment lacks resource requests/limits",
+			Impact:      "Add resource requests and limits for better scheduling",
+			Savings:     20.0,
+			Priority:    "medium",
+			Timestamp:   co.now(),
+		},
+	}
 }

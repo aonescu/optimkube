@@ -34,6 +34,7 @@ A comprehensive Kubernetes cost optimization tool similar to Cast AI that tracks
 - Go 1.21+ (for development)
 - Docker (for containerization)
 - kubectl access to the cluster
+- Or run entirely in demo mode (no cluster required) for quick evaluations
 
 ## Quick Start
 
@@ -154,6 +155,8 @@ The application can be configured through environment variables or the ConfigMap
 - `PORT`: Service port (default: 8080)
 - `LOG_LEVEL`: Logging level (debug, info, warn, error)
 - `KUBECONFIG`: Path to kubeconfig file (for out-of-cluster access)
+- `DEMO_MODE`: Set to `true` to serve synthetic metrics and recommendations without a live cluster
+- `CLUSTER_NAME`: Optional label injected into demo responses (default: `local-cluster`)
 
 ### ConfigMap Configuration
 
@@ -225,6 +228,9 @@ go mod download
 # Run locally (requires kubeconfig)
 export KUBECONFIG=~/.kube/config
 go run main.go
+
+# Run locally in demo mode (no cluster required)
+DEMO_MODE=true CLUSTER_NAME=demo go run main.go
 ```
 
 ### Testing
